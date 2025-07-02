@@ -450,5 +450,5 @@ def home():
 
 # Run the app
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=False, host="", port=5000)
 # Note: In production, set debug=False and use a proper WSGI server
