@@ -444,6 +444,9 @@ def admin_view_sessions():
         'rating': s.rating
     } for s in sessions])
 
+@app.route("/")
+def home():
+    return "Welcome to the Final Project API!"
 
 # Run the app
 if __name__ == '__main__':
