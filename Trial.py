@@ -1,44 +1,52 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import (
-    JWTManager, create_access_token, jwt_required, get_jwt_identity
+    JWTManager,
+    create_access_token,
+    jwt_required,
+    get_jwt_identity,
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
-import os
 from flask_cors import CORS  # Important for frontend communication
+from functools import wraps
+import os
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app)  # Enable CORS for all routes (consider restricting origins in production)
 
 # Configuration - using environment variables for production security
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///mentorship.db').replace('postgres://', 'postgresql://', 1)
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'super-secret-dev-key')  # Change in production
-app.config['PROPAGATE_EXCEPTIONS'] = True  # For better error handling
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+    "DATABASE_URL", "sqlite:///mentorship.db"
+).replace("postgres://", "postgresql://", 1)
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["JWT_SECRET_KEY"] = os.getenv(
+    "JWT_SECRET_KEY", "super-secret-dev-key"
+)  # Change in production
+app.config["PROPAGATE_EXCEPTIONS"] = True  # For better error handling
 
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
 
 # Roles
-ROLE_ADMIN = 'admin'
-ROLE_MENTOR = 'mentor'
-ROLE_MENTEE = 'mentee'
+ROLE_ADMIN = "admin"
+ROLE_MENTOR = "mentor"
+ROLE_MENTEE = "mentee"
 
 
-# Models (unchanged from your original code)
+# Models
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
     role = db.Column(db.String(20), nullable=False)
-    profile = db.relationship('Profile', backref='user', uselist=False)
-    availability = db.relationship('Availability', backref='mentor', lazy=True)
+    profile = db.relationship("Profile", backref="user", uselist=False)
+    availability = db.relationship("Availability", backref="mentor", lazy=True)
 
 
 class Profile(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     bio = db.Column(db.Text, nullable=True)
     skills = db.Column(db.String(200), nullable=True)
@@ -47,14 +55,16 @@ class Profile(db.Model):
 
 class MentorshipRequest(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    mentee_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    mentor_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    status = db.Column(db.String(20), nullable=False, default='PENDING')
+    mentee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    mentor_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="PENDING")
 
 
 class Session(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    mentorship_request_id = db.Column(db.Integer, db.ForeignKey('mentorship_request.id'), nullable=False)
+    mentorship_request_id = db.Column(
+        db.Integer, db.ForeignKey("mentorship_request.id"), nullable=False
+    )
     scheduled_time = db.Column(db.DateTime, nullable=False)
     feedback_mentee = db.Column(db.Text, nullable=True)
     feedback_mentor = db.Column(db.Text, nullable=True)
@@ -63,391 +73,446 @@ class Session(db.Model):
 
 class Availability(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    mentor_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    mentor_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     day_of_week = db.Column(db.String(10), nullable=False)
     start_time = db.Column(db.String(5), nullable=False)
     end_time = db.Column(db.String(5), nullable=False)
 
 
-# Initialize DB
+# Initialize DB (use Flask-Migrate for production)
 @app.before_first_request
 def create_tables():
     db.create_all()
 
 
-# Helper: role required decorator (unchanged)
+# Helper: role required decorator
 def role_required(*roles):
     def wrapper(fn):
+        @wraps(fn)
         @jwt_required()
         def decorator(*args, **kwargs):
             user_id = get_jwt_identity()
             user = User.query.get(user_id)
-            if user.role not in roles:
-                return jsonify({'msg': 'Access forbidden: insufficient permissions'}), 403
+            if not user or user.role not in roles:
+                return jsonify({"msg": "Access forbidden: insufficient permissions"}), 403
             return fn(*args, **kwargs)
-        decorator.__name__ = fn.__name__
+
         return decorator
+
     return wrapper
 
 
-# Authentication Endpoints (unchanged from your original code)
-@app.route('/auth/register', methods=['POST'])
+# Authentication Endpoints
+@app.route("/auth/register", methods=["POST"])
 def register():
     data = request.json
-    email = data.get('email')
-    password = data.get('password')
-    role = data.get('role')
+    email = data.get("email")
+    password = data.get("password")
+    role = data.get("role")
 
     if role not in [ROLE_ADMIN, ROLE_MENTOR, ROLE_MENTEE]:
-        return jsonify({'msg': 'Invalid role'}), 400
+        return jsonify({"msg": "Invalid role"}), 400
     if User.query.filter_by(email=email).first():
-        return jsonify({'msg': 'Email already registered'}), 400
+        return jsonify({"msg": "Email already registered"}), 400
 
     password_hash = generate_password_hash(password)
     user = User(email=email, password_hash=password_hash, role=role)
     db.session.add(user)
     db.session.commit()
-    return jsonify({'msg': 'User registered successfully'}), 201
+    return jsonify({"msg": "User registered successfully"}), 201
 
 
-@app.route('/auth/login', methods=['POST'])
+@app.route("/auth/login", methods=["POST"])
 def login():
     data = request.json
-    email = data.get('email')
-    password = data.get('password')
+    email = data.get("email")
+    password = data.get("password")
 
     user = User.query.filter_by(email=email).first()
     if not user or not check_password_hash(user.password_hash, password):
-        return jsonify({'msg': 'Bad email or password'}), 401
+        return jsonify({"msg": "Bad email or password"}), 401
 
     access_token = create_access_token(identity=user.id)
-    return jsonify({'access_token': access_token, 'role': user.role}), 200
+    return jsonify({"access_token": access_token, "role": user.role}), 200
 
 
-@app.route('/auth/logout', methods=['POST'])
+@app.route("/auth/logout", methods=["POST"])
 @jwt_required()
 def logout():
-    return jsonify({'msg': 'Logout successful'}), 200
+    return jsonify({"msg": "Logout successful"}), 200
 
 
-@app.route('/auth/me', methods=['GET'])
+@app.route("/auth/me", methods=["GET"])
 @jwt_required()
 def get_current_user():
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
     if not user:
-        return jsonify({'msg': 'User not found'}), 404
-    return jsonify({
-        'id': user.id,
-        'email': user.email,
-        'role': user.role
-    })
+        return jsonify({"msg": "User not found"}), 404
+    return jsonify({"id": user.id, "email": user.email, "role": user.role})
 
 
-# User Profile Endpoints (unchanged from your original code)
-@app.route('/users/me', methods=['GET'])
+# User Profile Endpoints
+@app.route("/users/me", methods=["GET"])
 @jwt_required()
 def get_my_profile():
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
     if not user:
-        return jsonify({'msg': 'User not found'}), 404
+        return jsonify({"msg": "User not found"}), 404
     profile = user.profile
-    return jsonify({
-        'email': user.email,
-        'role': user.role,
-        'profile': {
-            'name': profile.name if profile else None,
-            'bio': profile.bio if profile else None,
-            'skills': profile.skills.split(',') if profile and profile.skills else [],
-            'goals': profile.goals.split(',') if profile and profile.goals else []
+    return jsonify(
+        {
+            "email": user.email,
+            "role": user.role,
+            "profile": {
+                "name": profile.name if profile else None,
+                "bio": profile.bio if profile else None,
+                "skills": (
+                    profile.skills.split(",") if profile and profile.skills else []
+                ),
+                "goals": profile.goals.split(",") if profile and profile.goals else [],
+            },
         }
-    })
+    )
 
 
-@app.route('/users/me/profile', methods=['PUT'])
+@app.route("/users/me/profile", methods=["PUT"])
 @jwt_required()
 def update_profile():
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
     if not user:
-        return jsonify({'msg': 'User not found'}), 404
+        return jsonify({"msg": "User not found"}), 404
     data = request.json
     if not user.profile:
         user.profile = Profile(user_id=user.id)
-    user.profile.name = data.get('name', user.profile.name)
-    user.profile.bio = data.get('bio', user.profile.bio)
-    user.profile.skills = ','.join(data.get('skills', user.profile.skills.split(',') if user.profile.skills else []))
-    user.profile.goals = ','.join(data.get('goals', user.profile.goals.split(',') if user.profile.goals else []))
+        db.session.add(user.profile)
+    user.profile.name = data.get("name", user.profile.name)
+    user.profile.bio = data.get("bio", user.profile.bio)
+    user.profile.skills = ",".join(
+        data.get(
+            "skills", user.profile.skills.split(",") if user.profile.skills else []
+        )
+    )
+    user.profile.goals = ",".join(
+        data.get("goals", user.profile.goals.split(",") if user.profile.goals else [])
+    )
     db.session.commit()
-    return jsonify({'msg': 'Profile updated successfully'})
+    return jsonify({"msg": "Profile updated successfully"})
 
 
-@app.route('/users/<int:user_id>', methods=['GET'])
+@app.route("/users/<int:user_id>", methods=["GET"])
 @jwt_required()
 def get_user_profile(user_id):
     user = User.query.get(user_id)
     if not user:
-        return jsonify({'msg': 'User not found'}), 404
+        return jsonify({"msg": "User not found"}), 404
     profile = user.profile
-    return jsonify({
-        'id': user.id,
-        'email': user.email,
-        'role': user.role,
-        'profile': {
-            'name': profile.name if profile else None,
-            'bio': profile.bio if profile else None,
-            'skills': profile.skills.split(',') if profile and profile.skills else [],
-            'goals': profile.goals.split(',') if profile and profile.goals else []
+    return jsonify(
+        {
+            "id": user.id,
+            "email": user.email,
+            "role": user.role,
+            "profile": {
+                "name": profile.name if profile else None,
+                "bio": profile.bio if profile else None,
+                "skills": (
+                    profile.skills.split(",") if profile and profile.skills else []
+                ),
+                "goals": profile.goals.split(",") if profile and profile.goals else [],
+            },
         }
-    })
+    )
 
 
-# Mentor Discovery and Matching (unchanged from your original code)
-@app.route('/mentors', methods=['GET'])
+# Mentor Discovery and Matching
+@app.route("/mentors", methods=["GET"])
 @jwt_required()
 def list_mentors():
-    skill_filter = request.args.get('skill')
+    skill_filter = request.args.get("skill")
     query = User.query.filter_by(role=ROLE_MENTOR)
     if skill_filter:
-        query = query.join(Profile).filter(Profile.skills.like(f'%{skill_filter}%'))
+        query = query.join(Profile).filter(Profile.skills.like(f"%{skill_filter}%"))
     mentors = query.all()
     result = []
     for mentor in mentors:
         profile = mentor.profile
-        result.append({
-            'id': mentor.id,
-            'name': profile.name if profile else None,
-            'bio': profile.bio if profile else None,
-            'skills': profile.skills.split(',') if profile and profile.skills else [],
-            'goals': profile.goals.split(',') if profile and profile.goals else []
-        })
+        result.append(
+            {
+                "id": mentor.id,
+                "name": profile.name if profile else None,
+                "bio": profile.bio if profile else None,
+                "skills": (
+                    profile.skills.split(",") if profile and profile.skills else []
+                ),
+                "goals": profile.goals.split(",") if profile and profile.goals else [],
+            }
+        )
     return jsonify(result)
 
 
-@app.route('/requests', methods=['POST'])
+@app.route("/requests", methods=["POST"])
 @role_required(ROLE_MENTEE)
 def send_mentorship_request():
     user_id = get_jwt_identity()
     data = request.json
-    mentor_id = data.get('mentor_id')
+    mentor_id = data.get("mentor_id")
     if not User.query.filter_by(id=mentor_id, role=ROLE_MENTOR).first():
-        return jsonify({'msg': 'Mentor not found'}), 404
-    existing_request = MentorshipRequest.query.filter_by(mentee_id=user_id, mentor_id=mentor_id).first()
+        return jsonify({"msg": "Mentor not found"}), 404
+    existing_request = MentorshipRequest.query.filter_by(
+        mentee_id=user_id, mentor_id=mentor_id
+    ).first()
     if existing_request:
-        return jsonify({'msg': 'Request already sent'}), 400
-    req = MentorshipRequest(mentee_id=user_id, mentor_id=mentor_id, status='PENDING')
+        return jsonify({"msg": "Request already sent"}), 400
+    req = MentorshipRequest(mentee_id=user_id, mentor_id=mentor_id, status="PENDING")
     db.session.add(req)
     db.session.commit()
-    return jsonify({'msg': 'Request sent successfully'}), 201
+    return jsonify({"msg": "Request sent successfully"}), 201
 
 
-@app.route('/requests/sent', methods=['GET'])
+@app.route("/requests/sent", methods=["GET"])
 @role_required(ROLE_MENTEE)
 def get_sent_requests():
     user_id = get_jwt_identity()
     requests = MentorshipRequest.query.filter_by(mentee_id=user_id).all()
-    return jsonify([{'id': r.id, 'mentor_id': r.mentor_id, 'status': r.status} for r in requests])
+    return jsonify(
+        [{"id": r.id, "mentor_id": r.mentor_id, "status": r.status} for r in requests]
+    )
 
 
-@app.route('/requests/received', methods=['GET'])
+@app.route("/requests/received", methods=["GET"])
 @role_required(ROLE_MENTOR)
 def get_received_requests():
     user_id = get_jwt_identity()
     requests = MentorshipRequest.query.filter_by(mentor_id=user_id).all()
-    return jsonify([{'id': r.id, 'mentee_id': r.mentee_id, 'status': r.status} for r in requests])
+    return jsonify(
+        [{"id": r.id, "mentee_id": r.mentee_id, "status": r.status} for r in requests]
+    )
 
 
-@app.route('/requests/<int:req_id>', methods=['PUT'])
+@app.route("/requests/<int:req_id>", methods=["PUT"])
 @role_required(ROLE_MENTOR)
 def update_request_status(req_id):
     user_id = get_jwt_identity()
     req = MentorshipRequest.query.get(req_id)
     if not req or req.mentor_id != user_id:
-        return jsonify({'msg': 'Request not found'}), 404
+        return jsonify({"msg": "Request not found"}), 404
     data = request.json
-    status = data.get('status')
-    if status not in ['ACCEPTED', 'REJECTED']:
-        return jsonify({'msg': 'Invalid status'}), 400
+    status = data.get("status")
+    if status not in ["ACCEPTED", "REJECTED"]:
+        return jsonify({"msg": "Invalid status"}), 400
     req.status = status
     db.session.commit()
-    return jsonify({'msg': 'Request status updated'})
+    return jsonify({"msg": "Request status updated"})
 
 
-# Availability and Session Booking (unchanged from your original code)
-@app.route('/availability', methods=['POST'])
+# Availability and Session Booking
+@app.route("/availability", methods=["POST"])
 @role_required(ROLE_MENTOR)
 def set_availability():
     user_id = get_jwt_identity()
     data = request.json
-    day_of_week = data.get('day_of_week')
-    start_time = data.get('start_time')
-    end_time = data.get('end_time')
+    day_of_week = data.get("day_of_week")
+    start_time = data.get("start_time")
+    end_time = data.get("end_time")
 
     if not all([day_of_week, start_time, end_time]):
-        return jsonify({'msg': 'Missing availability data'}), 400
+        return jsonify({"msg": "Missing availability data"}), 400
 
     availability = Availability(
         mentor_id=user_id,
         day_of_week=day_of_week,
         start_time=start_time,
-        end_time=end_time
+        end_time=end_time,
     )
     db.session.add(availability)
     db.session.commit()
-    return jsonify({'msg': 'Availability set successfully'}), 201
+    return jsonify({"msg": "Availability set successfully"}), 201
 
 
-@app.route('/availability', methods=['GET'])
+@app.route("/availability", methods=["GET"])
 @role_required(ROLE_MENTOR)
 def get_availability():
     user_id = get_jwt_identity()
     slots = Availability.query.filter_by(mentor_id=user_id).all()
-    return jsonify([{
-        'id': slot.id,
-        'day_of_week': slot.day_of_week,
-        'start_time': slot.start_time,
-        'end_time': slot.end_time
-    } for slot in slots])
+    return jsonify(
+        [
+            {
+                "id": slot.id,
+                "day_of_week": slot.day_of_week,
+                "start_time": slot.start_time,
+                "end_time": slot.end_time,
+            }
+            for slot in slots
+        ]
+    )
 
 
-@app.route('/sessions', methods=['POST'])
+@app.route("/sessions", methods=["POST"])
 @jwt_required()
 def schedule_session():
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
     data = request.json
-    req_id = data.get('mentorship_request_id')
-    scheduled_time_str = data.get('scheduled_time')
+    req_id = data.get("mentorship_request_id")
+    scheduled_time_str = data.get("scheduled_time")
 
     try:
         scheduled_time = datetime.fromisoformat(scheduled_time_str)
     except Exception:
-        return jsonify({'msg': 'Invalid datetime format'}), 400
+        return jsonify({"msg": "Invalid datetime format"}), 400
 
     req = MentorshipRequest.query.get(req_id)
-    if not req or req.status != 'ACCEPTED':
-        return jsonify({'msg': 'Mentorship request not accepted'}), 400
+    if not req or req.status != "ACCEPTED":
+        return jsonify({"msg": "Mentorship request not accepted"}), 400
 
     if user.id not in [req.mentee_id, req.mentor_id]:
-        return jsonify({'msg': 'Not authorized for this session'}), 403
+        return jsonify({"msg": "Not authorized for this session"}), 403
 
     session = Session(mentorship_request_id=req_id, scheduled_time=scheduled_time)
     db.session.add(session)
     db.session.commit()
-    return jsonify({'msg': 'Session scheduled successfully'}), 201
+    return jsonify({"msg": "Session scheduled successfully"}), 201
 
 
-@app.route('/sessions/mentor', methods=['GET'])
+@app.route("/sessions/mentor", methods=["GET"])
 @role_required(ROLE_MENTOR)
 def get_sessions_mentor():
     user_id = get_jwt_identity()
-    sessions = Session.query.join(MentorshipRequest).filter(MentorshipRequest.mentor_id == user_id).all()
-    return jsonify([{
-        'id': s.id,
-        'scheduled_time': s.scheduled_time.isoformat(),
-        'mentorship_request_id': s.mentorship_request_id,
-        'feedback_mentee': s.feedback_mentee,
-        'feedback_mentor': s.feedback_mentor,
-        'rating': s.rating
-    } for s in sessions])
+    sessions = (
+        Session.query.join(MentorshipRequest)
+        .filter(MentorshipRequest.mentor_id == user_id)
+        .all()
+    )
+    return jsonify(
+        [
+            {
+                "id": s.id,
+                "scheduled_time": s.scheduled_time.isoformat(),
+                "mentorship_request_id": s.mentorship_request_id,
+                "feedback_mentee": s.feedback_mentee,
+                "feedback_mentor": s.feedback_mentor,
+                "rating": s.rating,
+            }
+            for s in sessions
+        ]
+    )
 
 
-@app.route('/sessions/mentee', methods=['GET'])
+@app.route("/sessions/mentee", methods=["GET"])
 @role_required(ROLE_MENTEE)
 def get_sessions_mentee():
     user_id = get_jwt_identity()
-    sessions = Session.query.join(MentorshipRequest).filter(MentorshipRequest.mentee_id == user_id).all()
-    return jsonify([{
-        'id': s.id,
-        'scheduled_time': s.scheduled_time.isoformat(),
-        'mentorship_request_id': s.mentorship_request_id,
-        'feedback_mentee': s.feedback_mentee,
-        'feedback_mentor': s.feedback_mentor,
-        'rating': s.rating
-    } for s in sessions])
+    sessions = (
+        Session.query.join(MentorshipRequest)
+        .filter(MentorshipRequest.mentee_id == user_id)
+        .all()
+    )
+    return jsonify(
+        [
+            {
+                "id": s.id,
+                "scheduled_time": s.scheduled_time.isoformat(),
+                "mentorship_request_id": s.mentorship_request_id,
+                "feedback_mentee": s.feedback_mentee,
+                "feedback_mentor": s.feedback_mentor,
+                "rating": s.rating,
+            }
+            for s in sessions
+        ]
+    )
 
 
-# Session Feedback (unchanged from your original code)
-@app.route('/sessions/<int:session_id>/feedback', methods=['PUT'])
+# Session Feedback
+@app.route("/sessions/<int:session_id>/feedback", methods=["PUT"])
 @jwt_required()
 def submit_feedback(session_id):
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
     session = Session.query.get(session_id)
     if not session:
-        return jsonify({'msg': 'Session not found'}), 404
+        return jsonify({"msg": "Session not found"}), 404
     req = MentorshipRequest.query.get(session.mentorship_request_id)
     if user.id not in [req.mentee_id, req.mentor_id]:
-        return jsonify({'msg': 'Not authorized for this session'}), 403
+        return jsonify({"msg": "Not authorized for this session"}), 403
     data = request.json
     if user.id == req.mentee_id:
-        rating = data.get('rating')
+        rating = data.get("rating")
         if rating is not None and (rating < 1 or rating > 5):
-            return jsonify({'msg': 'Rating must be between 1 and 5'}), 400
+            return jsonify({"msg": "Rating must be between 1 and 5"}), 400
         session.rating = rating if rating is not None else session.rating
-        session.feedback_mentee = data.get('comment', session.feedback_mentee)
+        session.feedback_mentee = data.get("comment", session.feedback_mentee)
     elif user.id == req.mentor_id:
-        session.feedback_mentor = data.get('comment', session.feedback_mentor)
+        session.feedback_mentor = data.get("comment", session.feedback_mentor)
     db.session.commit()
-    return jsonify({'msg': 'Feedback submitted successfully'})
+    return jsonify({"msg": "Feedback submitted successfully"})
 
 
-# Admin Dashboard Endpoints (unchanged from your original code)
-@app.route('/admin/users', methods=['GET'])
+# Admin Dashboard Endpoints
+@app.route("/admin/users", methods=["GET"])
 @role_required(ROLE_ADMIN)
 def admin_list_users():
     users = User.query.all()
-    return jsonify([{'id': u.id, 'email': u.email, 'role': u.role} for u in users])
+    return jsonify([{"id": u.id, "email": u.email, "role": u.role} for u in users])
 
 
-@app.route('/admin/users/<int:user_id>/role', methods=['PUT'])
+@app.route("/admin/users/<int:user_id>/role", methods=["PUT"])
 @role_required(ROLE_ADMIN)
 def admin_update_user_role(user_id):
     user = User.query.get(user_id)
     if not user:
-        return jsonify({'msg': 'User not found'}), 404
+        return jsonify({"msg": "User not found"}), 404
     data = request.json
-    new_role = data.get('role')
+    new_role = data.get("role")
     if new_role not in [ROLE_ADMIN, ROLE_MENTOR, ROLE_MENTEE]:
-        return jsonify({'msg': 'Invalid role'}), 400
+        return jsonify({"msg": "Invalid role"}), 400
     user.role = new_role
     db.session.commit()
-    return jsonify({'msg': 'User role updated successfully'})
+    return jsonify({"msg": "User role updated successfully"})
 
 
-@app.route('/admin/matches', methods=['GET'])
+@app.route("/admin/matches", methods=["GET"])
 @role_required(ROLE_ADMIN)
 def admin_view_matches():
     matches = MentorshipRequest.query.all()
-    return jsonify([{
-        'id': m.id,
-        'mentee_id': m.mentee_id,
-        'mentor_id': m.mentor_id,
-        'status': m.status
-    } for m in matches])
+    return jsonify(
+        [
+            {
+                "id": m.id,
+                "mentee_id": m.mentee_id,
+                "mentor_id": m.mentor_id,
+                "status": m.status,
+            }
+            for m in matches
+        ]
+    )
 
 
-@app.route('/admin/sessions', methods=['GET'])
+@app.route("/admin/sessions", methods=["GET"])
 @role_required(ROLE_ADMIN)
 def admin_view_sessions():
     sessions = Session.query.all()
-    return jsonify([{
-        'id': s.id,
-        'mentorship_request_id': s.mentorship_request_id,
-        'scheduled_time': s.scheduled_time.isoformat(),
-        'feedback_mentee': s.feedback_mentee,
-        'feedback_mentor': s.feedback_mentor,
-        'rating': s.rating
-    } for s in sessions])
+    return jsonify(
+        [
+            {
+                "id": s.id,
+                "mentorship_request_id": s.mentorship_request_id,
+                "scheduled_time": s.scheduled_time.isoformat(),
+                "feedback_mentee": s.feedback_mentee,
+                "feedback_mentor": s.feedback_mentor,
+                "rating": s.rating,
+            }
+            for s in sessions
+        ]
+    )
 
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///mentorship.db').replace('postgres://', 'postgresql://', 1)
 
 @app.route("/")
 def home():
     return "Welcome to the Mentorship API Service!"
 
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
