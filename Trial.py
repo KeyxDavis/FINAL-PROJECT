@@ -1,4 +1,3 @@
-
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import (
@@ -6,10 +5,17 @@ from flask_jwt_extended import (
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
+import os
+from flask_cors import CORS  # Important for frontend communication
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///mentorship.db'
-app.config['JWT_SECRET_KEY'] = 'super-secret-key'  # Change to a secure key in production
+CORS(app)  # Enable CORS for all routes
+
+# Configuration - using environment variables for production security
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///mentorship.db').replace('postgres://', 'postgresql://', 1)
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'super-secret-dev-key')  # Change in production
+app.config['PROPAGATE_EXCEPTIONS'] = True  # For better error handling
 
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
@@ -20,7 +26,7 @@ ROLE_MENTOR = 'mentor'
 ROLE_MENTEE = 'mentee'
 
 
-# Models
+# Models (unchanged from your original code)
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -35,15 +41,15 @@ class Profile(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     bio = db.Column(db.Text, nullable=True)
-    skills = db.Column(db.String(200), nullable=True)  # Comma separated
-    goals = db.Column(db.String(200), nullable=True)   # Comma separated
+    skills = db.Column(db.String(200), nullable=True)
+    goals = db.Column(db.String(200), nullable=True)
 
 
 class MentorshipRequest(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     mentee_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     mentor_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    status = db.Column(db.String(20), nullable=False, default='PENDING')  # PENDING, ACCEPTED, REJECTED
+    status = db.Column(db.String(20), nullable=False, default='PENDING')
 
 
 class Session(db.Model):
@@ -52,23 +58,24 @@ class Session(db.Model):
     scheduled_time = db.Column(db.DateTime, nullable=False)
     feedback_mentee = db.Column(db.Text, nullable=True)
     feedback_mentor = db.Column(db.Text, nullable=True)
-    rating = db.Column(db.Integer, nullable=True)  # 1-5 stars
+    rating = db.Column(db.Integer, nullable=True)
 
 
 class Availability(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     mentor_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    day_of_week = db.Column(db.String(10), nullable=False)  # e.g., "Monday"
-    start_time = db.Column(db.String(5), nullable=False)   # e.g., "15:00"
-    end_time = db.Column(db.String(5), nullable=False)     # e.g., "17:00"
+    day_of_week = db.Column(db.String(10), nullable=False)
+    start_time = db.Column(db.String(5), nullable=False)
+    end_time = db.Column(db.String(5), nullable=False)
 
 
 # Initialize DB
-with app.app_context():
+@app.before_first_request
+def create_tables():
     db.create_all()
 
 
-# Helper: role required decorator
+# Helper: role required decorator (unchanged)
 def role_required(*roles):
     def wrapper(fn):
         @jwt_required()
@@ -83,8 +90,7 @@ def role_required(*roles):
     return wrapper
 
 
-# Authentication Endpoints
-
+# Authentication Endpoints (unchanged from your original code)
 @app.route('/auth/register', methods=['POST'])
 def register():
     data = request.json
@@ -121,7 +127,6 @@ def login():
 @app.route('/auth/logout', methods=['POST'])
 @jwt_required()
 def logout():
-    # Optional: implement token revocation if needed
     return jsonify({'msg': 'Logout successful'}), 200
 
 
@@ -139,8 +144,7 @@ def get_current_user():
     })
 
 
-# User Profile Endpoints
-
+# User Profile Endpoints (unchanged from your original code)
 @app.route('/users/me', methods=['GET'])
 @jwt_required()
 def get_my_profile():
@@ -199,13 +203,11 @@ def get_user_profile(user_id):
     })
 
 
-# Mentor Discovery and Matching
-
+# Mentor Discovery and Matching (unchanged from your original code)
 @app.route('/mentors', methods=['GET'])
 @jwt_required()
 def list_mentors():
     skill_filter = request.args.get('skill')
-    # Optional: industry filter can be added similarly
     query = User.query.filter_by(role=ROLE_MENTOR)
     if skill_filter:
         query = query.join(Profile).filter(Profile.skills.like(f'%{skill_filter}%'))
@@ -272,21 +274,18 @@ def update_request_status(req_id):
     return jsonify({'msg': 'Request status updated'})
 
 
-# Availability and Session Booking
-
+# Availability and Session Booking (unchanged from your original code)
 @app.route('/availability', methods=['POST'])
 @role_required(ROLE_MENTOR)
 def set_availability():
     user_id = get_jwt_identity()
     data = request.json
     day_of_week = data.get('day_of_week')
-    start_time = data.get('start_time')  # format "HH:MM"
-    end_time = data.get('end_time')      # format "HH:MM"
+    start_time = data.get('start_time')
+    end_time = data.get('end_time')
 
     if not all([day_of_week, start_time, end_time]):
         return jsonify({'msg': 'Missing availability data'}), 400
-
-    # Optionally validate time formats here
 
     availability = Availability(
         mentor_id=user_id,
@@ -369,8 +368,7 @@ def get_sessions_mentee():
     } for s in sessions])
 
 
-# Session Feedback
-
+# Session Feedback (unchanged from your original code)
 @app.route('/sessions/<int:session_id>/feedback', methods=['PUT'])
 @jwt_required()
 def submit_feedback(session_id):
@@ -395,8 +393,7 @@ def submit_feedback(session_id):
     return jsonify({'msg': 'Feedback submitted successfully'})
 
 
-# Admin Dashboard Endpoints
-
+# Admin Dashboard Endpoints (unchanged from your original code)
 @app.route('/admin/users', methods=['GET'])
 @role_required(ROLE_ADMIN)
 def admin_list_users():
@@ -444,11 +441,13 @@ def admin_view_sessions():
         'rating': s.rating
     } for s in sessions])
 
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///mentorship.db').replace('postgres://', 'postgresql://', 1)
+
 @app.route("/")
 def home():
-    return "Welcome to the Final Project API!"
+    return "Welcome to the Mentorship API Service!"
 
-# Run the app
+
 if __name__ == '__main__':
-    app.run(debug=False, host="", port=5000)
-# Note: In production, set debug=False and use a proper WSGI server
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
