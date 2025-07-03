@@ -79,12 +79,6 @@ class Availability(db.Model):
     end_time = db.Column(db.String(5), nullable=False)
 
 
-# Initialize DB (use Flask-Migrate for production)
-@app.before_first_request
-def create_tables():
-    db.create_all()
-
-
 # Helper: role required decorator
 def role_required(*roles):
     def wrapper(fn):
@@ -94,7 +88,10 @@ def role_required(*roles):
             user_id = get_jwt_identity()
             user = User.query.get(user_id)
             if not user or user.role not in roles:
-                return jsonify({"msg": "Access forbidden: insufficient permissions"}), 403
+                return (
+                    jsonify({"msg": "Access forbidden: insufficient permissions"}),
+                    403,
+                )
             return fn(*args, **kwargs)
 
         return decorator
